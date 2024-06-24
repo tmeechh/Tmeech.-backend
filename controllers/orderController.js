@@ -10,81 +10,90 @@ const frontend_url = "https://tmeech-food-delivery-app.vercel.app/"
 
 // Placing user order from frontend 
 const placeOrder = async (req, res) => {
+  try {
+    const { userId, items, amount, address, paymentMethod } = req.body;
+
+    if (paymentMethod === 'Stripe') {
+      let line_items = items.map((item) => ({
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: item.name,
+          },
+          unit_amount: item.price * 100,
+        },
+        quantity: item.quantity,
+      }));
+
+      line_items.push({
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: "Delivery Charges",
+          },
+          unit_amount: 2 * 100,
+        },
+        quantity: 1,
+      });
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: line_items,
+        mode: 'payment',
+        success_url: `${frontend_url}/verify?success=true&userId=${userId}&items=${encodeURIComponent(JSON.stringify(items))}&amount=${amount}&address=${encodeURIComponent(JSON.stringify(address))}`,
+        cancel_url: `${frontend_url}/verify?success=false`,
+      });
+
+      res.json({ success: true, session_url: session.url });
+    } else {
+      const newOrder = new orderModel({
+        userId,
+        items,
+        amount,
+        address,
+        paymentMethod,
+      });
+
+      await newOrder.save();
+      await userModel.findByIdAndUpdate(userId, { cartData: {} });
+
+      res.json({ success: true, message: "Order placed successfully" });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Error placing order" });
+  }
+};
+
 
     
-    try {
-        const { userId, items, amount, address, paymentMethod } = req.body;
-    
-        const newOrder = new orderModel({
-          userId,
-          items,
-          amount,
-          address,
-          paymentMethod
-        });
-    
-        await newOrder.save();
-        
-        await userModel.findByIdAndUpdate(userId, { cartData: {} });
-    
-        if (paymentMethod === 'COD') {
-          res.json({ success: true, message: "Order placed successfully" });
-        } else if (paymentMethod === 'Stripe') {
-          let line_items = items.map((item) => ({
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: item.name
-              },
-              unit_amount: item.price * 100
-            },
-            quantity: item.quantity
-          }));
-    
-          line_items.push({
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: "Delivery Charges"
-              },
-              unit_amount: 2 * 100
-            },
-            quantity: 1
-          });
-    
-          const session = await stripe.checkout.sessions.create({
-            line_items: line_items,
-            mode: 'payment',
-            success_url: `${frontend_url}/verify?success=true&orderId=${newOrder._id}`,
-            cancel_url: `${frontend_url}/verify?success=false&orderId=${newOrder._id}`,
-          });
-    
-          res.json({ success: true, session_url: session.url });
-        } else {
-          res.status(400).json({ success: false, message: "Invalid payment method" });
-        }
-    
-      } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: "Error placing order" });
-      }
+const verifyOrder = async (req, res) => {
+  const { success, userId, items, amount, address } = req.query;
+
+  try {
+    if (success === "true") {
+      const newOrder = new orderModel({
+        userId,
+        items: JSON.parse(items),
+        amount,
+        address: JSON.parse(address),
+        paymentMethod: 'Stripe',
+        payment: true,
+      });
+
+      await newOrder.save();
+      await userModel.findByIdAndUpdate(userId, { cartData: {} });
+
+      res.json({ success: true, message: "Order placed and paid" });
+    } else {
+      res.json({ success: false, message: "Payment failed" });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Error verifying order" });
+  }
 };
-    
-    const verifyOrder = async (req, res) => {
-        const { orderId, success } = req.body;
-        try {
-          if (success === "true") {
-            await orderModel.findByIdAndUpdate(orderId, { payment: true });
-            res.json({ success: true, message: "Paid" });
-          } else {
-            await orderModel.findByIdAndDelete(orderId);
-            res.json({ success: false, message: "Not Paid" });
-          }
-        } catch (error) {
-          console.error(error);
-          res.status(500).json({ success: false, message: "Error verifying order" });
-        }
-      };
+
 
 // user order for frontend
 const userOrders = async (req, res) => {
