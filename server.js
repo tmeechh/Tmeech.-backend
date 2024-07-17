@@ -38,4 +38,3 @@ app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`)
 })
 
-// mongodb+srv://tmeech:388734@cluster1.n8unl5m.mongodb.net/?
